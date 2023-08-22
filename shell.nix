@@ -2,6 +2,7 @@
 pkgs.mkShell {
   buildInputs = [
     pkgs.cabal-install
-    pkgs.ghc
+    pkgs.ormolu
+    (pkgs.ghc.withPackages (pkgs: [ pkgs.X11 ]))
   ];
 }
