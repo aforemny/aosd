@@ -1,0 +1,5 @@
+# aosd
+
+## Pre-requisites
+
+- xcompmgr
