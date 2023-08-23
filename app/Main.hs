@@ -1,15 +1,17 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
 import Control.Concurrent
+import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
 import Data.Bits
 import Graphics.X11 qualified as X
 import Graphics.X11.Xlib.Extras qualified as X
 import System.IO
-import Control.Concurrent.STM
+import System.IO.Error
 
 data Env = Env
   { dpy :: X.Display,
@@ -60,16 +62,12 @@ run (Env {..}, stateT) = do
           case e of
             X.MotionEvent {X.ev_x} -> do
               let p = fi ev_x / fi width
-              -- TODO debounce duplicate values
-              putStrLn (show (floor (p * 100)))
-              atomically $ modifyTVar stateT (\state -> state { p = p })
+              atomically $ modifyTVar stateT (\state -> state {p = p})
             X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x} ->
               when (ev_event_type == X.buttonRelease && ev_button == X.button1) $ do
                 X.ungrabPointer dpy X.currentTime
                 let p = fi ev_x / fi width
-                -- TODO debounce duplicate values
-                putStrLn (show (floor (p * 100)))
-                atomically $ modifyTVar stateT (\state -> state { p = p, grabbing = False })
+                atomically $ modifyTVar stateT (\state -> state {p = p, grabbing = False})
                 -- XXX since -threaded, sync is required or else the application locks up
                 X.sync dpy True
             _ -> pure ()
@@ -80,9 +78,7 @@ run (Env {..}, stateT) = do
                 grabStatus <- X.grabPointer dpy win True (X.pointerMotionMask .|. X.buttonReleaseMask) X.grabModeAsync X.grabModeAsync X.none X.none X.currentTime
                 when (grabStatus == X.grabSuccess) $ do
                   let p = fi ev_x / fi width
-                  -- TODO debounce duplicate values
-                  putStrLn (show (floor (p * 100)))
-                  atomically $ modifyTVar stateT (\state -> state { p = p, grabbing = True })
+                  atomically $ modifyTVar stateT (\state -> state {p = p, grabbing = True})
                   -- XXX since -threaded, sync is required or else the application locks up
                   X.sync dpy True
                 pure ()
@@ -131,10 +127,38 @@ createWindow = do
   let p = 1
       grabbing = False
   stateT <- newTVarIO State {..}
-  forkIO $ forever $ do
-    p <- (/ 100) . read <$> getLine
-    atomically $ modifyTVar stateT (\state -> state { p = p })
+  _ <- forkIO $ consumeInput stateT
+  _ <- forkIO $ produceOutput stateT
   pure (Env {..}, stateT)
+
+consumeInput :: TVar State -> IO ()
+consumeInput stateT =
+  catchJust
+    (guard . isEOFError)
+    ( forever $ do
+        p <- (/ 100) . read <$> getLine
+        atomically $ do
+          state <- readTVar stateT
+          when (p /= state.p) $ do
+            writeTVar stateT state {p = p}
+    )
+    (\_ -> pure ())
+
+produceOutput :: TVar State -> IO ()
+produceOutput stateT = do
+  state <- atomically $ readTVar stateT
+  go Nothing
+  where
+    go o' = do
+      o <- atomically $ do
+        state <- readTVar stateT
+        let o = toOutput state.p
+        when (Just o == o') retry
+        pure o
+      putStrLn o
+      go (Just o)
+    toOutput p =
+      show (floor (100 * p))
 
 fi :: (Integral a, Num b) => a -> b
 fi = fromIntegral
