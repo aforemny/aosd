@@ -13,8 +13,8 @@ import Data.Maybe
 import GHC.Ptr (Ptr)
 import Graphics.X11 qualified as X
 import Graphics.X11.Xlib.Extras qualified as X
-import System.IO
 import Options.Applicative
+import System.IO
 import System.IO.Error
 
 data Args = Args
@@ -84,20 +84,32 @@ main = do
 
 run :: (Env, TVar State) -> IO ()
 run (env@(Env {..}), stateT) = do
+  pStateT <- newTVarIO Nothing
+  paintIfChanged env pStateT stateT
   X.allocaXEvent $ \ev -> forever $ do
     state <- atomically $ readTVar stateT
-    state' <- processEvents ev env state
-    -- XXX note that _NET_WM_STATE_FULLSCREEN should be enough to stack this above _NET_WM_TYPE_DOCK, but it isn't
-    X.raiseWindow dpy win
-    when (state' /= state) $ paint env state'
-    X.sync dpy False
-    atomically $ writeTVar stateT state' {dirty = False}
-    threadDelay 1666
+    if not state.grabbing
+      then do
+        timeOut <- X.waitForEvent dpy maxBound
+        when (not timeOut) $ processEvents ev env stateT
+      else do
+        processEvents ev env stateT
+        paintIfChanged env pStateT stateT
+        threadDelay 16666
 
-processEvents :: Ptr X.XEvent -> Env -> State -> IO State
-processEvents ev env@(Env {..}) state = do
-  n <- X.eventsQueued dpy X.queuedAlready
-  foldM (\state _ -> processEvent ev env state) state [1 .. n]
+processEvents :: Ptr X.XEvent -> Env -> TVar State -> IO ()
+processEvents ev env@(Env {..}) stateT = do
+  state <- atomically $ readTVar stateT
+  state' <- go state
+  atomically $ writeTVar stateT state'
+  where
+    go state = do
+      timeOut <- X.waitForEvent dpy 0
+      if timeOut
+        then pure state
+        else do
+          state' <- processEvent ev env state
+          go state'
 
 processEvent :: Ptr X.XEvent -> Env -> State -> IO State
 processEvent ev (Env {..}) state@(State {..}) = do
@@ -134,6 +146,18 @@ processEvent ev (Env {..}) state@(State {..}) = do
       | X.ExposeEvent {} <- e ->
           pure state {dirty = True}
       | otherwise -> pure state
+
+paintIfChanged :: Env -> TVar (Maybe State) -> TVar State -> IO ()
+paintIfChanged env@(Env {..}) pStateT stateT = do
+  (pState, state) <- atomically $ do
+    (,) <$> readTVar pStateT <*> readTVar stateT
+  when (Just state /= pState) $ do
+    paint env state
+    X.flush dpy
+    atomically $ do
+      let state' = state {dirty = False}
+      writeTVar pStateT (Just state')
+      writeTVar stateT state'
 
 paint :: Env -> State -> IO ()
 paint Env {..} State {grabbing = False} = do
