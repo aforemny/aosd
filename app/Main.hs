@@ -9,6 +9,7 @@ import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
 import Data.Bits
+import Data.Maybe
 import GHC.Ptr (Ptr)
 import Graphics.X11 qualified as X
 import Graphics.X11.Xlib.Extras qualified as X
@@ -49,7 +50,7 @@ data Env = Env
   }
 
 data State = State
-  { p :: Float,
+  { p :: Maybe Float,
     grabbing :: Bool,
     dirty :: Bool
   }
@@ -86,14 +87,14 @@ processEvent ev (Env {..}) state@(State {..}) = do
   if
       | grabbing,
         X.MotionEvent {X.ev_x} <- e -> do
-          let p = fi ev_x / fi width
+          let p = Just (fi ev_x / fi width)
           pure state {p = p}
       | grabbing,
         X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x} <- e,
         ev_event_type == X.buttonRelease,
         ev_button == X.button1 -> do
           X.ungrabPointer dpy X.currentTime
-          let p = fi ev_x / fi width
+          let p = Just (fi ev_x / fi width)
           pure state {p = p, grabbing = False}
       | not grabbing,
         X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x} <- e,
@@ -102,7 +103,7 @@ processEvent ev (Env {..}) state@(State {..}) = do
           grabStatus <- X.grabPointer dpy win True (X.pointerMotionMask .|. X.buttonReleaseMask) X.grabModeAsync X.grabModeAsync X.none X.none X.currentTime
           if (grabStatus == X.grabSuccess)
             then do
-              let p = fi ev_x / fi width
+              let p = Just (fi ev_x / fi width)
               pure state {p = p, grabbing = True}
             else pure state
       | X.ExposeEvent {} <- e ->
@@ -120,7 +121,7 @@ paint Env {..} State {grabbing = True, ..} = do
   X.fillRectangle dpy drw gc 0 0 (fi width) (fi height)
   X.setForeground dpy gc white
   X.setBackground dpy gc white
-  X.fillRectangle dpy drw gc 0 0 (floor (p * fi width)) (fi height)
+  X.fillRectangle dpy drw gc 0 0 (floor (fromMaybe 1 p * fi width)) (fi height)
 
 destroyWindow :: (Env, TVar State) -> IO ()
 destroyWindow (Env {..}, _) = do
@@ -162,7 +163,7 @@ createWindow args = do
   gc <- X.createGC dpy drw
   X.mapWindow dpy win
   X.selectInput dpy win (X.buttonPressMask .|. X.exposureMask)
-  let p = 1
+  let p = Nothing
       grabbing = False
       dirty = True
   stateT <- newTVarIO State {..}
@@ -176,7 +177,7 @@ consumeInput stateT =
   catchJust
     (guard . isEOFError)
     ( forever $ do
-        p <- (/ 100) . read <$> getLine
+        p <- Just . (/ 100) . read <$> getLine
         atomically $ do
           state <- readTVar stateT
           when (p /= state.p) $ do
@@ -190,9 +191,13 @@ produceOutput Env {..} stateT = go Nothing
     go o' = do
       o <- atomically $ do
         state <- readTVar stateT
-        let o = toOutput state.p
-        when (Just o == o') retry
-        pure o
+        case state.p of
+          Just p -> do
+            let o = toOutput p
+            when (Just o == o') retry
+            pure o
+          Nothing ->
+            retry
       putStrLn o
       hFlush stdout
       go (Just o)
