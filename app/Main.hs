@@ -19,14 +19,31 @@ import System.IO.Error
 
 data Args = Args
   { min :: Int,
-    max :: Int
+    max :: Int,
+    position :: Position
   }
+
+data Position
+  = Top
+  | Left'
 
 argsParser :: Parser Args
 argsParser =
   Args
     <$> option percentage (long "min" <> metavar "PERCENT" <> help "Minimum percentage" <> showDefault <> value 0)
     <*> option percentage (long "max" <> metavar "PERCENT" <> help "Maximum percentage" <> showDefault <> value 100)
+    <*> option
+      position
+      ( long "position"
+          <> metavar "POSITION"
+          <> help "Position"
+          <> showDefaultWith
+            ( \position -> case position of
+                Top -> "top"
+                Left' -> "left"
+            )
+          <> value Top
+      )
   where
     percentage = fi <$> auto
     position =
@@ -46,7 +63,9 @@ data Env = Env
     gc :: X.GC,
     white :: X.Pixel,
     black :: X.Pixel,
-    pixm :: X.Pixmap
+    pixm :: X.Pixmap,
+    wwidth :: Int,
+    wheight :: Int
   }
 
 data State = State
@@ -86,24 +105,30 @@ processEvent ev (Env {..}) state@(State {..}) = do
   e <- X.getEvent ev
   if
       | grabbing,
-        X.MotionEvent {X.ev_x} <- e -> do
-          let p = Just (fi ev_x / fi width)
+        X.MotionEvent {X.ev_x, X.ev_y} <- e -> do
+          let p = case args.position of
+                Top -> Just (fi ev_x / fi wwidth)
+                Left' -> Just (fi (wheight - fi ev_y) / fi wheight)
           pure state {p = p}
       | grabbing,
-        X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x} <- e,
+        X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x, X.ev_y} <- e,
         ev_event_type == X.buttonRelease,
         ev_button == X.button1 -> do
           X.ungrabPointer dpy X.currentTime
-          let p = Just (fi ev_x / fi width)
+          let p = case args.position of
+                Top -> Just (fi ev_x / fi wwidth)
+                Left' -> Just (fi (wheight - fi ev_y) / fi wheight)
           pure state {p = p, grabbing = False}
       | not grabbing,
-        X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x} <- e,
+        X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x, X.ev_y} <- e,
         ev_event_type == X.buttonPress,
         ev_button == X.button1 -> do
           grabStatus <- X.grabPointer dpy win True (X.pointerMotionMask .|. X.buttonReleaseMask) X.grabModeAsync X.grabModeAsync X.none X.none X.currentTime
           if (grabStatus == X.grabSuccess)
             then do
-              let p = Just (fi ev_x / fi width)
+              let p = case args.position of
+                    Top -> Just (fi ev_x / fi wwidth)
+                    Left' -> Just (fi (wheight - fi ev_y) / fi wheight)
               pure state {p = p, grabbing = True}
             else pure state
       | X.ExposeEvent {} <- e ->
@@ -114,16 +139,18 @@ paint :: Env -> State -> IO ()
 paint Env {..} State {grabbing = False} = do
   X.setForeground dpy gc 0
   X.setBackground dpy gc 0
-  X.fillRectangle dpy pixm gc 0 0 (fi width) (fi height)
-  X.copyArea dpy pixm win gc 0 0 (fi width) (fi height) 0 0
+  X.fillRectangle dpy pixm gc 0 0 (fi wwidth) (fi wheight)
+  X.copyArea dpy pixm win gc 0 0 (fi wwidth) (fi wheight) 0 0
 paint Env {..} State {grabbing = True, ..} = do
   X.setForeground dpy gc 0
   X.setBackground dpy gc 0
-  X.fillRectangle dpy pixm gc 0 0 (fi width) (fi height)
+  X.fillRectangle dpy pixm gc 0 0 (fi wwidth) (fi wheight)
   X.setForeground dpy gc white
   X.setBackground dpy gc white
-  X.fillRectangle dpy pixm gc 0 0 (floor (fromMaybe 1 p * fi width)) (fi height)
-  X.copyArea dpy pixm win gc 0 0 (fi width) (fi height) 0 0
+  case args.position of
+    Top -> X.fillRectangle dpy pixm gc 0 0 (floor (fromMaybe 1 p * fi wwidth)) (fi wheight)
+    Left' -> X.fillRectangle dpy pixm gc 0 (floor ((1 - fromMaybe 1 p) * fi wheight)) (fi wwidth) (fi wheight)
+  X.copyArea dpy pixm win gc 0 0 (fi wwidth) (fi wheight) 0 0
 
 destroyWindow :: (Env, TVar State) -> IO ()
 destroyWindow (Env {..}, _) = do
@@ -142,15 +169,27 @@ createWindow args = do
       dpth = X.visualInfo_depth vinfo
       vis = X.visualInfo_visual vinfo
       vmsk = X.cWColormap .|. X.cWBorderPixel .|. X.cWBackingPixel .|. X.cWOverrideRedirect
-      width = fi (X.displayWidth dpy scrn)
+      width = case args.position of
+        Top -> fi (X.displayWidth dpy scrn)
+        Left' -> fi (X.displayHeight dpy scrn)
       height = 64
+      wwidth =
+        ( case args.position of
+            Top -> fi width
+            Left' -> fi height
+        )
+      wheight =
+        ( case args.position of
+            Top -> fi height
+            Left' -> fi width
+        )
   cmap <- X.createColormap dpy root vis X.allocNone
   win <- X.allocaSetWindowAttributes $ \attr -> do
     X.set_colormap attr cmap
     X.set_border_pixel attr 0
     X.set_background_pixel attr 0
     X.set_override_redirect attr True
-    X.createWindow dpy root 0 0 (fi width) (fi height) 0 dpth cls vis vmsk attr
+    X.createWindow dpy root 0 0 (fi wwidth) (fi wheight) 0 dpth cls vis vmsk attr
   atom <- X.internAtom dpy "ATOM" True
   wmState <- X.internAtom dpy "_NET_WM_STATE" False
   wmStateSticky <- X.internAtom dpy "_NET_WM_STATE_STICKY" False
@@ -161,7 +200,7 @@ createWindow args = do
       fi wmStateSticky,
       fi wmStateFullscreen
     ]
-  pixm <- X.createPixmap dpy win (fi width) (fi height) dpth
+  pixm <- X.createPixmap dpy win (fi wwidth) (fi wheight) dpth
   gc <- X.createGC dpy win
   X.mapWindow dpy win
   X.selectInput dpy win (X.buttonPressMask .|. X.exposureMask)
