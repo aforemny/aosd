@@ -34,18 +34,15 @@ main = do
   wmState <- internAtom dpy "_NET_WM_STATE" False
   wmStateSticky <- internAtom dpy "_NET_WM_STATE_STICKY" False
   wmStateAbove <- internAtom dpy "_NET_WM_STATE_ABOVE" False
+  wmStateFullscreen <- internAtom dpy "_NET_WM_STATE_FULLSCREEN" False
   changeProperty32 dpy win wmState atom propModeReplace $
     [ fi wmStateAbove,
-      fi wmStateSticky
+      fi wmStateSticky,
+      fi wmStateFullscreen
     ]
-  wmWindowType <- internAtom dpy "_NET_WM_WINDOW_TYPE" False
-  wmWindowTypeDock <- internAtom dpy "_NET_WM_WINDOW_TYPE_DOCK" False
-  changeProperty32 dpy win wmWindowType atom propModeReplace $
-    [fi wmWindowTypeDock]
   let drw = win
   gc <- createGC dpy drw
   mapWindow dpy win
-  raiseWindow dpy win
   selectInput dpy win buttonPressMask
   pR <- newIORef (1 :: Float)
   grabbingR <- newIORef False
@@ -56,6 +53,7 @@ main = do
     hFlush stdout
     p <- readIORef pR
     grabbing <- readIORef grabbingR
+    raiseWindow dpy win
     if grabbing
       then do
         setForeground dpy gc 0
