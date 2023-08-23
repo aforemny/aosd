@@ -44,9 +44,9 @@ data Env = Env
     width :: Int,
     height :: Int,
     gc :: X.GC,
-    drw :: X.Drawable,
     white :: X.Pixel,
-    black :: X.Pixel
+    black :: X.Pixel,
+    pixm :: X.Pixmap
   }
 
 data State = State
@@ -114,14 +114,16 @@ paint :: Env -> State -> IO ()
 paint Env {..} State {grabbing = False} = do
   X.setForeground dpy gc 0
   X.setBackground dpy gc 0
-  X.fillRectangle dpy drw gc 0 0 (fi width) (fi height)
+  X.fillRectangle dpy pixm gc 0 0 (fi width) (fi height)
+  X.copyArea dpy pixm win gc 0 0 (fi width) (fi height) 0 0
 paint Env {..} State {grabbing = True, ..} = do
   X.setForeground dpy gc 0
   X.setBackground dpy gc 0
-  X.fillRectangle dpy drw gc 0 0 (fi width) (fi height)
+  X.fillRectangle dpy pixm gc 0 0 (fi width) (fi height)
   X.setForeground dpy gc white
   X.setBackground dpy gc white
-  X.fillRectangle dpy drw gc 0 0 (floor (fromMaybe 1 p * fi width)) (fi height)
+  X.fillRectangle dpy pixm gc 0 0 (floor (fromMaybe 1 p * fi width)) (fi height)
+  X.copyArea dpy pixm win gc 0 0 (fi width) (fi height) 0 0
 
 destroyWindow :: (Env, TVar State) -> IO ()
 destroyWindow (Env {..}, _) = do
@@ -159,8 +161,8 @@ createWindow args = do
       fi wmStateSticky,
       fi wmStateFullscreen
     ]
-  let drw = win
-  gc <- X.createGC dpy drw
+  pixm <- X.createPixmap dpy win (fi width) (fi height) dpth
+  gc <- X.createGC dpy win
   X.mapWindow dpy win
   X.selectInput dpy win (X.buttonPressMask .|. X.exposureMask)
   let p = Nothing
