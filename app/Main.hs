@@ -182,7 +182,7 @@ consumeInput stateT =
         p <- Just . (/ 100) . read <$> getLine
         atomically $ do
           state <- readTVar stateT
-          when (p /= state.p) $ do
+          when (p /= state.p && not state.grabbing) $ do
             writeTVar stateT state {p = p}
     )
     (\_ -> pure ())
