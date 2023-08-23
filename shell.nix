@@ -3,6 +3,9 @@ pkgs.mkShell {
   buildInputs = [
     pkgs.cabal-install
     pkgs.ormolu
-    (pkgs.ghc.withPackages (pkgs: [ pkgs.X11 ]))
+    (pkgs.ghc.withPackages (pkgs: [
+      pkgs.optparse-applicative
+      pkgs.X11
+    ]))
   ];
 }

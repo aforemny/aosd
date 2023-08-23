@@ -13,10 +13,32 @@ import GHC.Ptr (Ptr)
 import Graphics.X11 qualified as X
 import Graphics.X11.Xlib.Extras qualified as X
 import System.IO
+import Options.Applicative
 import System.IO.Error
 
+data Args = Args
+  { min :: Int,
+    max :: Int
+  }
+
+argsParser :: Parser Args
+argsParser =
+  Args
+    <$> option percentage (long "min" <> metavar "PERCENT" <> help "Minimum percentage" <> showDefault <> value 0)
+    <*> option percentage (long "max" <> metavar "PERCENT" <> help "Maximum percentage" <> showDefault <> value 100)
+  where
+    percentage = fi <$> auto
+    position =
+      maybeReader
+        ( \string -> case string of
+            "top" -> Just Top
+            "left" -> Just Left'
+            _ -> Nothing
+        )
+
 data Env = Env
-  { dpy :: X.Display,
+  { args :: Args,
+    dpy :: X.Display,
     win :: X.Window,
     width :: Int,
     height :: Int,
@@ -34,7 +56,11 @@ data State = State
   deriving (Show, Eq)
 
 main :: IO ()
-main = bracket createWindow destroyWindow run
+main = do
+  args <- execParser opts
+  bracket (createWindow args) destroyWindow run
+  where
+    opts = info (argsParser <**> helper) (fullDesc <> header "aosd - a simple OSD")
 
 run :: (Env, TVar State) -> IO ()
 run (env@(Env {..}), stateT) = do
@@ -100,8 +126,8 @@ destroyWindow :: (Env, TVar State) -> IO ()
 destroyWindow (Env {..}, _) = do
   X.destroyWindow dpy win
 
-createWindow :: IO (Env, TVar State)
-createWindow = do
+createWindow :: Args -> IO (Env, TVar State)
+createWindow args = do
   dpy <- X.openDisplay ""
   let scrn = X.defaultScreen dpy
       black = X.blackPixel dpy scrn
@@ -140,9 +166,10 @@ createWindow = do
       grabbing = False
       dirty = True
   stateT <- newTVarIO State {..}
+  let env = Env {..}
   _ <- forkIO $ consumeInput stateT
-  _ <- forkIO $ produceOutput stateT
-  pure (Env {..}, stateT)
+  _ <- forkIO $ produceOutput env stateT
+  pure (env, stateT)
 
 consumeInput :: TVar State -> IO ()
 consumeInput stateT =
@@ -157,8 +184,8 @@ consumeInput stateT =
     )
     (\_ -> pure ())
 
-produceOutput :: TVar State -> IO ()
-produceOutput stateT = go Nothing
+produceOutput :: Env -> TVar State -> IO ()
+produceOutput Env {..} stateT = go Nothing
   where
     go o' = do
       o <- atomically $ do
@@ -170,7 +197,7 @@ produceOutput stateT = go Nothing
       hFlush stdout
       go (Just o)
     toOutput p =
-      show (floor (100 * p) :: Int)
+      show (floor ((fi args.max - fi args.min) * p + fi args.min) :: Int)
 
 fi :: (Integral a, Num b) => a -> b
 fi = fromIntegral
