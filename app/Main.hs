@@ -12,6 +12,7 @@ import Data.Bits
 import GHC.Ptr (Ptr)
 import Graphics.X11 qualified as X
 import Graphics.X11.Xlib.Extras qualified as X
+import System.IO
 import System.IO.Error
 
 data Env = Env
@@ -166,6 +167,7 @@ produceOutput stateT = go Nothing
         when (Just o == o') retry
         pure o
       putStrLn o
+      hFlush stdout
       go (Just o)
     toOutput p =
       show (floor (100 * p) :: Int)
