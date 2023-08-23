@@ -53,6 +53,7 @@ main = do
     hFlush stdout
     p <- readIORef pR
     grabbing <- readIORef grabbingR
+    -- XXX note that _NET_WM_STATE_FULLSCREEN should be enough to stack this above _NET_WM_TYPE_DOCK, but it isn't
     raiseWindow dpy win
     if grabbing
       then do
