@@ -20,6 +20,7 @@ executable aosd
     -- other-extensions:
     build-depends:
       base ^>=4.16.4.0,
-      X11
+      X11,
+      stm
     hs-source-dirs:   app
     default-language: GHC2021

@@ -6,10 +6,10 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Data.Bits
-import Data.IORef
 import Graphics.X11 qualified as X
 import Graphics.X11.Xlib.Extras qualified as X
 import System.IO
+import Control.Concurrent.STM
 
 data Env = Env
   { dpy :: X.Display,
@@ -23,19 +23,18 @@ data Env = Env
   }
 
 data State = State
-  { pR :: IORef Float,
-    grabbingR :: IORef Bool
+  { p :: Float,
+    grabbing :: Bool
   }
 
 main :: IO ()
 main = bracket createWindow destroyWindow run
 
-run :: (Env, State) -> IO ()
-run (Env {..}, State {..}) = do
+run :: (Env, TVar State) -> IO ()
+run (Env {..}, stateT) = do
   X.allocaXEvent $ \ev -> forever $ do
     hFlush stdout
-    p <- readIORef pR
-    grabbing <- readIORef grabbingR
+    State {..} <- atomically $ readTVar stateT
     -- XXX note that _NET_WM_STATE_FULLSCREEN should be enough to stack this above _NET_WM_TYPE_DOCK, but it isn't
     X.raiseWindow dpy win
     if grabbing
@@ -61,17 +60,16 @@ run (Env {..}, State {..}) = do
           case e of
             X.MotionEvent {X.ev_x} -> do
               let p = fi ev_x / fi width
-              writeIORef pR p
               -- TODO debounce duplicate values
               putStrLn (show (floor (p * 100)))
+              atomically $ modifyTVar stateT (\state -> state { p = p })
             X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x} ->
               when (ev_event_type == X.buttonRelease && ev_button == X.button1) $ do
                 X.ungrabPointer dpy X.currentTime
                 let p = fi ev_x / fi width
-                writeIORef pR p
                 -- TODO debounce duplicate values
                 putStrLn (show (floor (p * 100)))
-                writeIORef grabbingR False
+                atomically $ modifyTVar stateT (\state -> state { p = p, grabbing = False })
                 -- XXX since -threaded, sync is required or else the application locks up
                 X.sync dpy True
             _ -> pure ()
@@ -82,20 +80,19 @@ run (Env {..}, State {..}) = do
                 grabStatus <- X.grabPointer dpy win True (X.pointerMotionMask .|. X.buttonReleaseMask) X.grabModeAsync X.grabModeAsync X.none X.none X.currentTime
                 when (grabStatus == X.grabSuccess) $ do
                   let p = fi ev_x / fi width
-                  writeIORef pR p
                   -- TODO debounce duplicate values
                   putStrLn (show (floor (p * 100)))
-                  writeIORef grabbingR True
+                  atomically $ modifyTVar stateT (\state -> state { p = p, grabbing = True })
                   -- XXX since -threaded, sync is required or else the application locks up
                   X.sync dpy True
                 pure ()
             _ -> pure ()
 
-destroyWindow :: (Env, State) -> IO ()
+destroyWindow :: (Env, TVar State) -> IO ()
 destroyWindow (Env {..}, _) = do
   X.destroyWindow dpy win
 
-createWindow :: IO (Env, State)
+createWindow :: IO (Env, TVar State)
 createWindow = do
   dpy <- X.openDisplay ""
   let scrn = X.defaultScreen dpy
@@ -131,12 +128,13 @@ createWindow = do
   gc <- X.createGC dpy drw
   X.mapWindow dpy win
   X.selectInput dpy win X.buttonPressMask
-  pR <- newIORef (1 :: Float)
-  grabbingR <- newIORef False
+  let p = 1
+      grabbing = False
+  stateT <- newTVarIO State {..}
   forkIO $ forever $ do
     p <- (/ 100) . read <$> getLine
-    writeIORef pR p
-  pure (Env {..}, State {..})
+    atomically $ modifyTVar stateT (\state -> state { p = p })
+  pure (Env {..}, stateT)
 
 fi :: (Integral a, Num b) => a -> b
 fi = fromIntegral
