@@ -87,7 +87,8 @@ data Env = Env
 data State = State
   { p :: Maybe Float,
     grabbing :: Bool,
-    dirty :: Bool
+    dirty :: Bool,
+    remainFor :: Maybe Int
   }
   deriving (Show, Eq)
 
@@ -104,14 +105,16 @@ run (env@(Env {..}), stateT) = do
   paintIfChanged env pStateT stateT
   X.allocaXEvent $ \ev -> forever $ do
     state <- atomically $ readTVar stateT
-    if not state.grabbing
+    if state.grabbing || isJust state.remainFor || state.dirty
       then do
-        timeOut <- X.waitForEvent dpy maxBound
-        when (not timeOut) $ processEvents ev env stateT
-      else do
         processEvents ev env stateT
         paintIfChanged env pStateT stateT
-        threadDelay 16666
+        threadDelay dt
+      else do
+        timeOut <- X.waitForEvent dpy (fi dt)
+        when (not timeOut) $ processEvents ev env stateT
+  where
+    dt = 16666
 
 processEvents :: Ptr X.XEvent -> Env -> TVar State -> IO ()
 processEvents ev env@(Env {..}) stateT = do
@@ -146,7 +149,7 @@ processEvent ev (Env {..}) state@(State {..}) = do
         ev_event_type == X.buttonRelease,
         ev_button == X.button1 -> do
           X.ungrabPointer dpy X.currentTime
-          pure state {p = p ev_x ev_y, grabbing = False}
+          pure state {p = p ev_x ev_y, grabbing = False, remainFor = Just 1500}
       | not grabbing,
         X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x, X.ev_y} <- e,
         ev_event_type == X.buttonPress,
@@ -168,16 +171,23 @@ paintIfChanged :: Env -> TVar (Maybe State) -> TVar State -> IO ()
 paintIfChanged env@(Env {..}) pStateT stateT = do
   (pState, state) <- atomically $ do
     (,) <$> readTVar pStateT <*> readTVar stateT
-  when (Just state /= pState) $ do
+  when (Just state /= pState || state.dirty) $ do
     paint env state
     X.flush dpy
     atomically $ do
-      let state' = state {dirty = False}
-      writeTVar pStateT (Just state')
+      let state' =
+            state
+              { dirty = True,
+                remainFor =
+                  state.remainFor >>= \forMs -> do
+                    let forMs' = forMs - 16
+                    if forMs' <= 0 then Nothing else Just forMs'
+              }
+      writeTVar pStateT (Just state)
       writeTVar stateT state'
 
 paint :: Env -> State -> IO ()
-paint Env {..} State {grabbing = False} = do
+paint Env {..} State {grabbing = False, remainFor = Nothing} = do
   X.setForeground dpy gc 0
   X.setBackground dpy gc 0
   X.fillRectangle dpy pixm gc 0 0 (fi wwidth) (fi wheight)
@@ -249,6 +259,7 @@ createWindow args = do
   let p = Nothing
       grabbing = False
       dirty = True
+      remainFor = Nothing
   stateT <- newTVarIO State {..}
   let env = Env {..}
   _ <- forkIO $ consumeInput stateT
@@ -264,7 +275,11 @@ consumeInput stateT =
         atomically $ do
           state <- readTVar stateT
           when (p /= state.p && not state.grabbing) $ do
-            writeTVar stateT state {p = p}
+            writeTVar stateT $
+              state
+                { p = p,
+                  remainFor = if isNothing state.p then Nothing else Just 1500
+                }
     )
     (\_ -> pure ())
 
