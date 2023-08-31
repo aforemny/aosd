@@ -18,8 +18,8 @@ import System.IO
 import System.IO.Error
 
 data Args = Args
-  { min :: Int,
-    max :: Int,
+  { pmin :: Int,
+    pmax :: Int,
     position :: Position
   }
 
@@ -72,12 +72,14 @@ data Env = Env
   { args :: Args,
     dpy :: X.Display,
     win :: X.Window,
-    width :: Int,
-    height :: Int,
+    swidth :: Int,
+    sheight :: Int,
     gc :: X.GC,
     white :: X.Pixel,
     black :: X.Pixel,
     pixm :: X.Pixmap,
+    wleft :: Int,
+    wtop :: Int,
     wwidth :: Int,
     wheight :: Int
   }
@@ -129,33 +131,29 @@ processEvent :: Ptr X.XEvent -> Env -> State -> IO State
 processEvent ev (Env {..}) state@(State {..}) = do
   X.nextEvent dpy ev
   e <- X.getEvent ev
+  let p x' y' =
+        let x = clamp 0 wwidth (fi x')
+            y = clamp 0 wheight (fi y')
+         in Just $ clamp 0 1 $ case args.position of
+              Top -> fi x / fi wwidth
+              Left' -> fi (wheight - fi y) / fi wheight
   if
       | grabbing,
         X.MotionEvent {X.ev_x, X.ev_y} <- e -> do
-          let p = case args.position of
-                Top -> Just (fi ev_x / fi wwidth)
-                Left' -> Just (fi (wheight - fi ev_y) / fi wheight)
-          pure state {p = p}
+          pure state {p = p ev_x ev_y}
       | grabbing,
         X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x, X.ev_y} <- e,
         ev_event_type == X.buttonRelease,
         ev_button == X.button1 -> do
           X.ungrabPointer dpy X.currentTime
-          let p = case args.position of
-                Top -> Just (fi ev_x / fi wwidth)
-                Left' -> Just (fi (wheight - fi ev_y) / fi wheight)
-          pure state {p = p, grabbing = False}
+          pure state {p = p ev_x ev_y, grabbing = False}
       | not grabbing,
         X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x, X.ev_y} <- e,
         ev_event_type == X.buttonPress,
         ev_button == X.button1 -> do
           grabStatus <- X.grabPointer dpy win True (X.pointerMotionMask .|. X.buttonReleaseMask) X.grabModeAsync X.grabModeAsync X.none X.none X.currentTime
           if (grabStatus == X.grabSuccess)
-            then do
-              let p = case args.position of
-                    Top -> Just (fi ev_x / fi wwidth)
-                    Left' -> Just (fi (wheight - fi ev_y) / fi wheight)
-              pure state {p = p, grabbing = True}
+            then pure state {p = p ev_x ev_y, grabbing = True}
             else pure state
       | X.ExposeEvent {} <- e ->
           pure state {dirty = True}
@@ -184,15 +182,16 @@ paint Env {..} State {grabbing = False} = do
   X.setBackground dpy gc 0
   X.fillRectangle dpy pixm gc 0 0 (fi wwidth) (fi wheight)
   X.copyArea dpy pixm win gc 0 0 (fi wwidth) (fi wheight) 0 0
-paint Env {..} State {grabbing = True, ..} = do
+paint Env {..} State {..} = do
   X.setForeground dpy gc 0
   X.setBackground dpy gc 0
   X.fillRectangle dpy pixm gc 0 0 (fi wwidth) (fi wheight)
   X.setForeground dpy gc white
   X.setBackground dpy gc white
+  let pad = 24
   case args.position of
-    Top -> X.fillRectangle dpy pixm gc 0 0 (floor (fromMaybe 1 p * fi wwidth)) (fi wheight)
-    Left' -> X.fillRectangle dpy pixm gc 0 (floor ((1 - fromMaybe 1 p) * fi wheight)) (fi wwidth) (fi wheight)
+    Top -> X.fillRectangle dpy pixm gc 0 (fi pad) (floor (fromMaybe 1 p * fi wwidth)) (fi wheight - pad)
+    Left' -> X.fillRectangle dpy pixm gc (fi pad) (floor ((1 - fromMaybe 1 p) * fi wheight)) (fi wwidth - pad) (fi wheight)
   X.copyArea dpy pixm win gc 0 0 (fi wwidth) (fi wheight) 0 0
 
 destroyWindow :: (Env, TVar State) -> IO ()
@@ -212,27 +211,27 @@ createWindow args = do
       dpth = X.visualInfo_depth vinfo
       vis = X.visualInfo_visual vinfo
       vmsk = X.cWColormap .|. X.cWBorderPixel .|. X.cWBackingPixel .|. X.cWOverrideRedirect
-      width = case args.position of
-        Top -> fi (X.displayWidth dpy scrn)
-        Left' -> fi (X.displayHeight dpy scrn)
-      height = 64
-      wwidth =
-        ( case args.position of
-            Top -> fi width
-            Left' -> fi height
-        )
-      wheight =
-        ( case args.position of
-            Top -> fi height
-            Left' -> fi width
-        )
+      swidth = fi (X.displayWidth dpy scrn)
+      sheight = fi (X.displayHeight dpy scrn)
+      wwidth = case args.position of
+        Top -> floor (0.5 * fi swidth)
+        Left' -> fi 64
+      wheight = case args.position of
+        Top -> fi 64
+        Left' -> floor (0.5 * fi sheight)
+      wleft = case args.position of
+        Top -> floor (0.25 * fi swidth)
+        Left' -> floor (0.05 * fi (min swidth sheight))
+      wtop = case args.position of
+        Top -> floor (0.05 * fi (min swidth sheight))
+        Left' -> floor (0.25 * fi sheight)
   cmap <- X.createColormap dpy root vis X.allocNone
   win <- X.allocaSetWindowAttributes $ \attr -> do
     X.set_colormap attr cmap
     X.set_border_pixel attr 0
     X.set_background_pixel attr 0
     X.set_override_redirect attr True
-    X.createWindow dpy root 0 0 (fi wwidth) (fi wheight) 0 dpth cls vis vmsk attr
+    X.createWindow dpy root (fi wleft) (fi wtop) (fi wwidth) (fi wheight) 0 dpth cls vis vmsk attr
   atom <- X.internAtom dpy "ATOM" True
   wmState <- X.internAtom dpy "_NET_WM_STATE" False
   wmStateSticky <- X.internAtom dpy "_NET_WM_STATE_STICKY" False
@@ -286,7 +285,10 @@ produceOutput Env {..} stateT = go Nothing
       hFlush stdout
       go (Just o)
     toOutput p =
-      show (floor ((fi args.max - fi args.min) * p + fi args.min) :: Int)
+      show (floor ((fi args.pmax - fi args.pmin) * p + fi args.pmin) :: Int)
 
 fi :: (Integral a, Num b) => a -> b
 fi = fromIntegral
+
+clamp :: Ord a => a -> a -> a -> a
+clamp mi ma = max mi . min ma
