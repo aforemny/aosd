@@ -145,6 +145,11 @@ processEvent ev (Env {..}) state@(State {..}) = do
             else pure state
       | X.ExposeEvent {} <- e ->
           pure state {dirty = True}
+      | X.AnyEvent {ev_event_type} <- e,
+        ev_event_type == X.visibilityNotify -> do
+          X.raiseWindow dpy win
+          X.flush dpy
+          pure state
       | otherwise -> pure state
 
 paintIfChanged :: Env -> TVar (Maybe State) -> TVar State -> IO ()
@@ -227,7 +232,7 @@ createWindow args = do
   pixm <- X.createPixmap dpy win (fi wwidth) (fi wheight) dpth
   gc <- X.createGC dpy win
   X.mapWindow dpy win
-  X.selectInput dpy win (X.buttonPressMask .|. X.exposureMask)
+  X.selectInput dpy win (X.buttonPressMask .|. X.exposureMask .|. X.visibilityChangeMask)
   let p = Nothing
       grabbing = False
       dirty = True
