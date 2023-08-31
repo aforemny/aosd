@@ -262,16 +262,16 @@ createWindow args = do
       remainFor = Nothing
   stateT <- newTVarIO State {..}
   let env = Env {..}
-  _ <- forkIO $ consumeInput stateT
+  _ <- forkIO $ consumeInput env stateT
   _ <- forkIO $ produceOutput env stateT
   pure (env, stateT)
 
-consumeInput :: TVar State -> IO ()
-consumeInput stateT =
+consumeInput :: Env -> TVar State -> IO ()
+consumeInput Env {..} stateT =
   catchJust
     (guard . isEOFError)
     ( forever $ do
-        p <- Just . (/ 100) . read <$> getLine
+        p <- Just . clamp 0 1 . (\p -> fi (p - args.pmin) / fi args.pmax) . read <$> getLine
         atomically $ do
           state <- readTVar stateT
           when (p /= state.p && not state.grabbing) $ do
@@ -300,7 +300,7 @@ produceOutput Env {..} stateT = go Nothing
       hFlush stdout
       go (Just o)
     toOutput p =
-      show (floor ((fi args.pmax - fi args.pmin) * p + fi args.pmin) :: Int)
+      show (floor ((fi args.pmax - fi args.pmin) * clamp 0 1 p + fi args.pmin) :: Int)
 
 fi :: (Integral a, Num b) => a -> b
 fi = fromIntegral
