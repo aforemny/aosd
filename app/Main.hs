@@ -289,9 +289,10 @@ produceOutput Env {..} stateT = go Nothing
     go o' = do
       o <- atomically $ do
         state <- readTVar stateT
+        when (not state.grabbing) retry
         case state.p of
           Just p -> do
-            let o = toOutput p
+            let o = show (floor ((fi args.pmax - fi args.pmin) * clamp 0 1 p + fi args.pmin) :: Int)
             when (Just o == o') retry
             pure o
           Nothing ->
@@ -299,8 +300,6 @@ produceOutput Env {..} stateT = go Nothing
       putStrLn o
       hFlush stdout
       go (Just o)
-    toOutput p =
-      show (floor ((fi args.pmax - fi args.pmin) * clamp 0 1 p + fi args.pmin) :: Int)
 
 fi :: (Integral a, Num b) => a -> b
 fi = fromIntegral

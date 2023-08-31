@@ -10,19 +10,18 @@
 
 ```console
 get_volume() {
-  while true; do
+  pactl subscribe | grep --line-buffered 'Event '\''change'\'' on sink #0' | while read _; do
     pamixer --get-volume
-    sleep 1s
   done
 }
 
 set_volume() {
   while read volume; do
-    pamixer --set-volume "$volume"
+    pamixer --allow-boost --set-volume "$volume"
   done
 }
 
-get_volume | aosd --max 150 | set_volume
+get_volume | aosd --max 153 | set_volume
 ```
 
 ### Brightness control
