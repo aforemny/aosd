@@ -30,8 +30,22 @@ data Position
 argsParser :: Parser Args
 argsParser =
   Args
-    <$> option percentage (long "min" <> metavar "PERCENT" <> help "Minimum percentage" <> showDefault <> value 0)
-    <*> option percentage (long "max" <> metavar "PERCENT" <> help "Maximum percentage" <> showDefault <> value 100)
+    <$> option
+      percentage
+      ( long "min"
+          <> metavar "PERCENT"
+          <> help "Minimum percentage"
+          <> showDefault
+          <> value 0
+      )
+    <*> option
+      percentage
+      ( long "max"
+          <> metavar "PERCENT"
+          <> help "Maximum percentage"
+          <> showDefault
+          <> value 100
+      )
     <*> option
       position
       ( long "position"
