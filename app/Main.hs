@@ -209,8 +209,8 @@ paint Env {..} State {..} = do
   X.setBackground dpy gc white
   let pad = 24
   case args.position of
-    Top -> X.fillRectangle dpy pixm gc 0 (fi pad) (floor (fromMaybe 1 p * fi wwidth)) (fi wheight - pad)
-    Left' -> X.fillRectangle dpy pixm gc (fi pad) (floor ((1 - fromMaybe 1 p) * fi wheight)) (fi wwidth - pad) (fi wheight)
+    Top -> X.fillRectangle dpy pixm gc 0 (fi pad) (floor (fromMaybe 1 p * fi wwidth)) (fi wheight - 2 * pad)
+    Left' -> X.fillRectangle dpy pixm gc (fi pad) (floor ((1 - fromMaybe 1 p) * fi wheight)) (fi wwidth - 2 * pad) (fi wheight)
   X.copyArea dpy pixm win gc 0 0 (fi wwidth) (fi wheight) 0 0
 
 destroyWindow :: (Env, TVar State) -> IO ()
