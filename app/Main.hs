@@ -246,9 +246,10 @@ createWindow args = do
         Left' -> floor (0.25 * fi sheight)
   cmap <- X.createColormap dpy root vis X.allocNone
   win <- X.allocaSetWindowAttributes $ \attr -> do
-    X.set_colormap attr cmap
-    X.set_border_pixel attr 0
     X.set_background_pixel attr 0
+    X.set_border_pixel attr 0
+    X.set_colormap attr cmap
+    X.set_override_redirect attr True
     X.set_override_redirect attr True
     X.createWindow dpy root (fi wleft) (fi wtop) (fi wwidth) (fi wheight) 0 dpth cls vis vmsk attr
   atom <- X.internAtom dpy "ATOM" True
