@@ -95,12 +95,12 @@ data State = State
 main :: IO ()
 main = do
   args <- execParser opts
-  bracket (createWindow args) destroyWindow run
+  bracket (createWindow args) destroyWindow mainLoop
   where
     opts = info (argsParser <**> helper) (fullDesc <> header "aosd - a simple OSD")
 
-run :: (Env, TVar State) -> IO ()
-run (env@(Env {..}), stateT) = do
+mainLoop :: (Env, TVar State) -> IO ()
+mainLoop (env@(Env {..}), stateT) = do
   pStateT <- newTVarIO Nothing
   paintIfChanged env pStateT stateT
   X.allocaXEvent $ \ev -> forever $ do
