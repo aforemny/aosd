@@ -22,6 +22,7 @@ executable aosd
       base ^>=4.16.4.0,
       X11,
       stm,
-      optparse-applicative
+      optparse-applicative,
+      X11-xshape
     hs-source-dirs:   app
     default-language: GHC2021

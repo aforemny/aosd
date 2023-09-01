@@ -13,6 +13,7 @@ import Data.Maybe
 import GHC.Ptr (Ptr)
 import Graphics.X11 qualified as X
 import Graphics.X11.Xlib.Extras qualified as X
+import Graphics.X11.Xshape qualified as X
 import Options.Applicative
 import System.IO
 import System.IO.Error
@@ -20,7 +21,8 @@ import System.IO.Error
 data Args = Args
   { pmin :: Int,
     pmax :: Int,
-    position :: Position
+    position :: Position,
+    passive :: Bool
   }
 
 data Position
@@ -57,6 +59,13 @@ argsParser =
                 Left' -> "left"
             )
           <> value Top
+      )
+    <*> flag
+      False
+      True
+      ( long "passive"
+          <> help "Whether to react to mouse events (active)"
+          <> showDefault
       )
   where
     percentage = fi <$> auto
@@ -255,6 +264,13 @@ createWindow args = do
   pixm <- X.createPixmap dpy win (fi wwidth) (fi wheight) dpth
   gc <- X.createGC dpy win
   X.mapWindow dpy win
+  when args.passive $ do
+    spixm <- X.createPixmap dpy win (fi swidth) (fi sheight) 1
+    sgc <- X.createGC dpy spixm
+    X.setBackground dpy sgc 0
+    X.setForeground dpy sgc 1
+    X.fillRectangle dpy spixm sgc 0 0 0 0
+    X.xshapeCombineMask dpy win X.shapeInput 0 0 spixm X.shapeSet
   X.selectInput dpy win (X.buttonPressMask .|. X.exposureMask .|. X.visibilityChangeMask)
   let p = Nothing
       grabbing = False

@@ -6,6 +6,7 @@ pkgs.mkShell {
     (pkgs.ghc.withPackages (pkgs: [
       pkgs.optparse-applicative
       pkgs.X11
+      pkgs.X11-xshape
     ]))
   ];
 }
