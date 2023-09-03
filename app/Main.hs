@@ -198,19 +198,24 @@ paintIfChanged env@(Env {..}) pStateT stateT = do
 paint :: Env -> State -> IO ()
 paint Env {..} State {grabbing = False, remainFor = Nothing} = do
   X.setForeground dpy gc 0
-  X.setBackground dpy gc 0
   X.fillRectangle dpy pixm gc 0 0 (fi wwidth) (fi wheight)
   X.copyArea dpy pixm win gc 0 0 (fi wwidth) (fi wheight) 0 0
 paint Env {..} State {..} = do
-  X.setForeground dpy gc 0
-  X.setBackground dpy gc 0
+  let mar = 20
+      pad = 4
+  X.setForeground dpy gc 0x00000000
   X.fillRectangle dpy pixm gc 0 0 (fi wwidth) (fi wheight)
-  X.setForeground dpy gc white
-  X.setBackground dpy gc white
-  let pad = 24
+
+  X.setForeground dpy gc 0xff000000
   case args.position of
-    Top -> X.fillRectangle dpy pixm gc 0 (fi pad) (floor (fromMaybe 1 p * fi wwidth)) (fi wheight - 2 * pad)
-    Left' -> X.fillRectangle dpy pixm gc (fi pad) (floor ((1 - fromMaybe 1 p) * fi wheight)) (fi wwidth - 2 * pad) (fi wheight)
+    Top -> X.fillRectangle dpy pixm gc 0 (fi mar) (floor (fi wwidth)) (fi (wheight - 2 * mar))
+    Left' -> X.fillRectangle dpy pixm gc (fi mar) 0 (fi (wwidth - 2 * mar)) (fi wheight)
+
+  X.setForeground dpy gc 0xffffffff
+  case args.position of
+    Top -> X.fillRectangle dpy pixm gc (fi pad) (fi (mar + pad)) (floor (fromMaybe 1 p * fi (wwidth - 2 * pad))) (fi (wheight - 2 * (mar + pad)))
+    Left' -> X.fillRectangle dpy pixm gc (fi (mar + pad)) (fi pad + floor ((1 - fromMaybe 1 p) * fi (wheight - 2 * pad))) (fi (wwidth - 2 * (mar + pad))) (floor ((fromMaybe 1 p) * fi (wheight - 2 * pad)))
+
   X.copyArea dpy pixm win gc 0 0 (fi wwidth) (fi wheight) 0 0
 
 destroyWindow :: (Env, TVar State) -> IO ()
