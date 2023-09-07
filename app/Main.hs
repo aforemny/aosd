@@ -254,7 +254,7 @@ createWindow args = do
     X.set_background_pixel attr 0
     X.set_border_pixel attr 0
     X.set_colormap attr cmap
-    X.set_override_redirect attr False
+    X.set_override_redirect attr True
     X.createWindow dpy root (fi wleft) (fi wtop) (fi wwidth) (fi wheight) 0 dpth cls vis vmsk attr
   X.setClassHint dpy win X.ClassHint { resName = "aosd", resClass = "aosd" }
   atom <- X.internAtom dpy "ATOM" True
