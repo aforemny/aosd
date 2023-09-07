@@ -257,7 +257,7 @@ createWindow args = do
     X.set_colormap attr cmap
     X.set_override_redirect attr True
     X.createWindow dpy root (fi wleft) (fi wtop) (fi wwidth) (fi wheight) 0 dpth cls vis vmsk attr
-  X.setClassHint dpy win X.ClassHint { resName = "aosd", resClass = "aosd" }
+  X.setClassHint dpy win X.ClassHint {resName = "aosd", resClass = "aosd"}
   atom <- X.internAtom dpy "ATOM" True
   wmState <- X.internAtom dpy "_NET_WM_STATE" False
   wmStateSticky <- X.internAtom dpy "_NET_WM_STATE_STICKY" False
