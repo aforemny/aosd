@@ -1,8 +1,9 @@
 # aosd
 
-## Pre-requisites
+A simple on-screen display (OSD) that displays and changes a given value.
 
-- xcompmgr
+Current values (extraneous changes) are accepted on standard input, changes to
+the given value are produced on standard output.
 
 ## Usage
 

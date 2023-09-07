@@ -80,17 +80,20 @@ argsParser =
 data Env = Env
   { args :: Args,
     dpy :: X.Display,
-    win :: X.Window,
+    owin :: X.Window,
+    iwin :: X.Window,
     swidth :: Int,
     sheight :: Int,
     gc :: X.GC,
     white :: X.Pixel,
     black :: X.Pixel,
     pixm :: X.Pixmap,
-    wleft :: Int,
-    wtop :: Int,
-    wwidth :: Int,
-    wheight :: Int
+    iwidth :: Int,
+    iheight :: Int,
+    owidth :: Int,
+    oheight :: Int,
+    margin :: Int,
+    padding :: Int
   }
 
 data State = State
@@ -144,11 +147,11 @@ processEvent ev (Env {..}) state@(State {..}) = do
   X.nextEvent dpy ev
   e <- X.getEvent ev
   let p x' y' =
-        let x = clamp 0 wwidth (fi x')
-            y = clamp 0 wheight (fi y')
+        let x = clamp 0 iwidth (fi x')
+            y = clamp 0 iheight (fi y')
          in Just $ clamp 0 1 $ case args.position of
-              Top -> fi x / fi wwidth
-              Left' -> fi (wheight - fi y) / fi wheight
+              Top -> fi x / fi iwidth
+              Left' -> fi (iheight - fi y) / fi iheight
   if
       | grabbing,
         X.MotionEvent {X.ev_x, X.ev_y} <- e -> do
@@ -160,10 +163,10 @@ processEvent ev (Env {..}) state@(State {..}) = do
           X.ungrabPointer dpy X.currentTime
           pure state {p = p ev_x ev_y, grabbing = False, remainFor = Just 1500}
       | not grabbing,
-        X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x, X.ev_y} <- e,
+        X.ButtonEvent {X.ev_event_type, X.ev_button, X.ev_x, X.ev_y, X.ev_window} <- e,
         ev_event_type == X.buttonPress,
         ev_button == X.button1 -> do
-          grabStatus <- X.grabPointer dpy win True (X.pointerMotionMask .|. X.buttonReleaseMask) X.grabModeAsync X.grabModeAsync X.none X.none X.currentTime
+          grabStatus <- X.grabPointer dpy ev_window True (X.pointerMotionMask .|. X.buttonReleaseMask) X.grabModeAsync X.grabModeAsync X.none X.none X.currentTime
           if (grabStatus == X.grabSuccess)
             then pure state {p = p ev_x ev_y, grabbing = True}
             else pure state
@@ -171,7 +174,8 @@ processEvent ev (Env {..}) state@(State {..}) = do
           pure state {dirty = True}
       | X.AnyEvent {ev_event_type} <- e,
         ev_event_type == X.createNotify -> do
-          X.raiseWindow dpy win
+          X.raiseWindow dpy iwin
+          X.raiseWindow dpy owin
           X.flush dpy
           pure state
       | otherwise ->
@@ -197,31 +201,31 @@ paintIfChanged env@(Env {..}) pStateT stateT = do
       writeTVar stateT state'
 
 paint :: Env -> State -> IO ()
-paint Env {..} State {grabbing = False, remainFor = Nothing} = do
-  X.setForeground dpy gc 0
-  X.fillRectangle dpy pixm gc 0 0 (fi wwidth) (fi wheight)
-  X.copyArea dpy pixm win gc 0 0 (fi wwidth) (fi wheight) 0 0
+paint Env {..} State {grabbing = False, remainFor = Nothing} =
+  X.unmapWindow dpy owin
 paint Env {..} State {..} = do
-  let mar = 20
-      pad = 4
-  X.setForeground dpy gc 0x00000000
-  X.fillRectangle dpy pixm gc 0 0 (fi wwidth) (fi wheight)
+  X.mapWindow dpy owin
+  {-X.setForeground dpy gc 0xffff0000
+  X.fillRectangle dpy iwin gc 0 0 (fi iwidth) (fi iheight)-}
 
   X.setForeground dpy gc 0xff000000
-  case args.position of
-    Top -> X.fillRectangle dpy pixm gc 0 (fi mar) (floor (fi wwidth)) (fi (wheight - 2 * mar))
-    Left' -> X.fillRectangle dpy pixm gc (fi mar) 0 (fi (wwidth - 2 * mar)) (fi wheight)
+  X.fillRectangle dpy pixm gc 0 0 (fi owidth) (fi oheight)
 
+  let oleft' = padding
+      otop' = padding
+      owidth' = owidth - 2 * padding
+      oheight' = oheight - 2 * padding
   X.setForeground dpy gc 0xffffffff
   case args.position of
-    Top -> X.fillRectangle dpy pixm gc (fi pad) (fi (mar + pad)) (floor (fromMaybe 1 p * fi (wwidth - 2 * pad))) (fi (wheight - 2 * (mar + pad)))
-    Left' -> X.fillRectangle dpy pixm gc (fi (mar + pad)) (fi pad + floor ((1 - fromMaybe 1 p) * fi (wheight - 2 * pad))) (fi (wwidth - 2 * (mar + pad))) (floor ((fromMaybe 1 p) * fi (wheight - 2 * pad)))
+    Top -> X.fillRectangle dpy pixm gc (fi oleft') (fi otop') (floor (fromMaybe 1 p * fi owidth')) (fi oheight')
+    Left' -> X.fillRectangle dpy pixm gc (fi oleft') (fi otop' + floor ((1 - fromMaybe 1 p) * fi oheight')) (fi owidth') (floor ((fromMaybe 1 p) * fi oheight'))
 
-  X.copyArea dpy pixm win gc 0 0 (fi wwidth) (fi wheight) 0 0
+  X.copyArea dpy pixm owin gc 0 0 (fi owidth) (fi oheight) 0 0
 
 destroyWindow :: (Env, TVar State) -> IO ()
 destroyWindow (Env {..}, _) = do
-  X.destroyWindow dpy win
+  X.destroyWindow dpy owin
+  X.destroyWindow dpy iwin
 
 createWindow :: Args -> IO (Env, TVar State)
 createWindow args = do
@@ -232,53 +236,76 @@ createWindow args = do
       root = X.defaultRootWindow dpy
       trueColor = 4
   Just vinfo <- X.matchVisualInfo dpy scrn 32 trueColor
-  let cls = X.inputOutput
-      dpth = X.visualInfo_depth vinfo
+  let dpth = X.visualInfo_depth vinfo
       vis = X.visualInfo_visual vinfo
       vmsk = X.cWColormap .|. X.cWBorderPixel .|. X.cWBackingPixel .|. X.cWOverrideRedirect
       swidth = fi (X.displayWidth dpy scrn)
       sheight = fi (X.displayHeight dpy scrn)
-      wwidth = case args.position of
-        Top -> floor (0.5 * fi swidth)
-        Left' -> fi 64
-      wheight = case args.position of
-        Top -> fi 64
-        Left' -> floor (0.5 * fi sheight)
-      wleft = case args.position of
+      margin = 20
+      padding = 4
+      ileft = case args.position of
         Top -> floor (0.25 * fi swidth)
         Left' -> floor (0.05 * fi (min swidth sheight))
-      wtop = case args.position of
+      itop = case args.position of
         Top -> floor (0.05 * fi (min swidth sheight))
         Left' -> floor (0.25 * fi sheight)
+      iwidth = case args.position of
+        Top -> floor (0.5 * fi swidth)
+        Left' -> fi 64
+      iheight = case args.position of
+        Top -> fi 64
+        Left' -> floor (0.5 * fi sheight)
+      oleft = case args.position of
+        Top -> ileft
+        Left' -> ileft + margin
+      otop = case args.position of
+        Top -> itop + margin
+        Left' -> itop
+      owidth = case args.position of
+        Top -> iwidth
+        Left' -> iwidth - 2 * margin
+      oheight = case args.position of
+        Top -> iheight - 2 * margin
+        Left' -> iheight
   cmap <- X.createColormap dpy root vis X.allocNone
-  win <- X.allocaSetWindowAttributes $ \attr -> do
+  iwin <- X.allocaSetWindowAttributes $ \attr -> do
+    X.set_override_redirect attr True
+    {-X.set_background_pixel attr 0
+    X.set_border_pixel attr 0
+    X.set_colormap attr cmap
+    -- X.createWindow dpy root (fi ileft) (fi itop) (fi iwidth) (fi iheight) 0 dpth X.inputOutput vis vmsk attr-}
+    X.createWindow dpy root (fi ileft) (fi itop) (fi iwidth) (fi iheight) 0 0 X.inputOnly vis X.cWOverrideRedirect attr
+  owin <- X.allocaSetWindowAttributes $ \attr -> do
+    X.set_override_redirect attr True
     X.set_background_pixel attr 0
     X.set_border_pixel attr 0
     X.set_colormap attr cmap
-    X.set_override_redirect attr True
-    X.createWindow dpy root (fi wleft) (fi wtop) (fi wwidth) (fi wheight) 0 dpth cls vis vmsk attr
-  X.setClassHint dpy win X.ClassHint {resName = "aosd", resClass = "aosd"}
+    X.createWindow dpy root (fi oleft) (fi otop) (fi owidth) (fi oheight) 0 dpth X.inputOutput vis vmsk attr
+  X.setClassHint dpy owin X.ClassHint {resName = "aosd", resClass = "aosd"}
   atom <- X.internAtom dpy "ATOM" True
   wmState <- X.internAtom dpy "_NET_WM_STATE" False
   wmStateSticky <- X.internAtom dpy "_NET_WM_STATE_STICKY" False
   wmStateAbove <- X.internAtom dpy "_NET_WM_STATE_ABOVE" False
   wmStateFullscreen <- X.internAtom dpy "_NET_WM_STATE_FULLSCREEN" False
-  X.changeProperty32 dpy win wmState atom X.propModeReplace $
+  X.changeProperty32 dpy owin wmState atom X.propModeReplace $
     [ fi wmStateAbove,
       fi wmStateSticky,
       fi wmStateFullscreen
     ]
-  pixm <- X.createPixmap dpy win (fi wwidth) (fi wheight) dpth
-  gc <- X.createGC dpy win
-  X.mapWindow dpy win
+  pixm <- X.createPixmap dpy owin (fi owidth) (fi oheight) dpth
+  gc <- X.createGC dpy owin
+  X.mapWindow dpy owin
+  X.mapWindow dpy iwin
   when args.passive $ do
-    spixm <- X.createPixmap dpy win (fi swidth) (fi sheight) 1
+    spixm <- X.createPixmap dpy owin (fi swidth) (fi sheight) 1
     sgc <- X.createGC dpy spixm
     X.setBackground dpy sgc 0
     X.setForeground dpy sgc 1
     X.fillRectangle dpy spixm sgc 0 0 0 0
-    X.xshapeCombineMask dpy win X.shapeInput 0 0 spixm X.shapeSet
-  X.selectInput dpy win (X.buttonPressMask .|. X.exposureMask)
+    X.xshapeCombineMask dpy iwin X.shapeInput 0 0 spixm X.shapeSet
+    X.xshapeCombineMask dpy owin X.shapeInput 0 0 spixm X.shapeSet
+  X.selectInput dpy iwin X.buttonPressMask
+  X.selectInput dpy owin (X.buttonPressMask .|. X.exposureMask)
   X.selectInput dpy root X.substructureNotifyMask
   let p = Nothing
       grabbing = False
