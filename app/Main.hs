@@ -187,7 +187,7 @@ paintIfChanged env@(Env {..}) pStateT stateT = do
     atomically $ do
       let state' =
             state
-              { dirty = True,
+              { dirty = isJust state.remainFor,
                 remainFor =
                   state.remainFor >>= \forMs -> do
                     let forMs' = forMs - 16
