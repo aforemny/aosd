@@ -262,15 +262,10 @@ createWindow args = do
   wmStateSticky <- X.internAtom dpy "_NET_WM_STATE_STICKY" False
   wmStateAbove <- X.internAtom dpy "_NET_WM_STATE_ABOVE" False
   wmStateFullscreen <- X.internAtom dpy "_NET_WM_STATE_FULLSCREEN" False
-  wmWindowType <- X.internAtom dpy "_NET_WM_WINDOW_TYPE" False
-  wmWindowTypeNotification <- X.internAtom dpy "_NET_WM_WINDOW_TYPE_NOTIFICATION" False
   X.changeProperty32 dpy win wmState atom X.propModeReplace $
     [ fi wmStateAbove,
       fi wmStateSticky,
       fi wmStateFullscreen
-    ]
-  X.changeProperty32 dpy win wmWindowType atom X.propModeReplace $
-    [ fi wmWindowTypeNotification
     ]
   pixm <- X.createPixmap dpy win (fi wwidth) (fi wheight) dpth
   gc <- X.createGC dpy win
