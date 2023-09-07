@@ -170,11 +170,12 @@ processEvent ev (Env {..}) state@(State {..}) = do
       | X.ExposeEvent {} <- e ->
           pure state {dirty = True}
       | X.AnyEvent {ev_event_type} <- e,
-        ev_event_type == X.visibilityNotify -> do
+        ev_event_type == X.createNotify -> do
           X.raiseWindow dpy win
           X.flush dpy
           pure state
-      | otherwise -> pure state
+      | otherwise ->
+          pure state
 
 paintIfChanged :: Env -> TVar (Maybe State) -> TVar State -> IO ()
 paintIfChanged env@(Env {..}) pStateT stateT = do
@@ -277,7 +278,8 @@ createWindow args = do
     X.setForeground dpy sgc 1
     X.fillRectangle dpy spixm sgc 0 0 0 0
     X.xshapeCombineMask dpy win X.shapeInput 0 0 spixm X.shapeSet
-  X.selectInput dpy win (X.buttonPressMask .|. X.exposureMask .|. X.visibilityChangeMask)
+  X.selectInput dpy win (X.buttonPressMask .|. X.exposureMask)
+  X.selectInput dpy root X.substructureNotifyMask
   let p = Nothing
       grabbing = False
       dirty = True
