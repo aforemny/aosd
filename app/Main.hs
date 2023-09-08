@@ -172,13 +172,16 @@ processEvent ev (Env {..}) state@(State {..}) = do
             else pure state
       | X.ExposeEvent {} <- e ->
           pure state {dirty = True}
-      | X.AnyEvent {ev_event_type} <- e,
-        ev_event_type == X.createNotify -> do
+      | X.ConfigureEvent {X.ev_event_type, X.ev_window, X.ev_above} <- e,
+        ev_event_type == X.configureNotify,
+        ev_above /= X.none,
+        ev_window /= iwin,
+        ev_window /= owin -> do
           X.raiseWindow dpy iwin
           X.raiseWindow dpy owin
           X.flush dpy
           pure state
-      | otherwise ->
+      | otherwise -> do
           pure state
 
 paintIfChanged :: Env -> TVar (Maybe State) -> TVar State -> IO ()
